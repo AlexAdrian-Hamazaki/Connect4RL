@@ -51,7 +51,7 @@ def resize_frames(frames, fraction):
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    path = "models/DQN/lesson2_trained_agent.pt"  # Path to saved agent checkpoint
+    path = "models/DQN/lesson3_trained_agent.pt"  # Path to saved agent checkpoint
 
     env = connect_four_v3.env(render_mode="rgb_array")
     env.reset()

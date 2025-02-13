@@ -8,7 +8,7 @@ import os
 import random
 from collections import deque
 from datetime import datetime
-
+import json
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,7 @@ import wandb
 import yaml
 from pettingzoo.classic import connect_four_v3
 from tqdm import tqdm, trange
+from agilerl.algorithms.dqn import DQN
 
 
 from agilerl.components.replay_buffer import ReplayBuffer
@@ -87,6 +88,7 @@ class CurriculumEnv:
                 )
 
                 if done or truncation:
+                    
                     reward = self.reward(done=True, player=0)
                     memory.save_to_memory_vect_envs(
                         np.concatenate(
@@ -144,6 +146,8 @@ class CurriculumEnv:
 
                     if done or truncation:
                         reward = self.reward(done=True, player=1)
+                
+                        
                         memory.save_to_memory_vect_envs(
                             np.concatenate(
                                 (p0_state, p1_state, p0_state_flipped, p1_state_flipped)
@@ -280,11 +284,7 @@ class CurriculumEnv:
         :type player: int
         """
         if done:
-            reward = (
-                self.lesson["rewards"]["vertical_win"]
-                if self.check_vertical_win(player)
-                else self.lesson["rewards"]["win"]
-            )
+            reward = self.lesson["rewards"]["win"]
         else:
             agent_three_count = self.check_three_in_row(1 - player)
             opp_three_count = self.check_three_in_row(player)
@@ -506,7 +506,7 @@ if __name__ == "__main__":
     print("===== AgileRL Curriculum Learning Demo =====")
 
     
-    for lesson_number in range(1, 5):
+    for lesson_number in range(2, 3):
         # Load lesson for curriculum
         with open(f"lesson{lesson_number}.yml") as file:
             LESSON = yaml.safe_load(file)
@@ -532,7 +532,7 @@ if __name__ == "__main__":
             "LR": 1e-4,  # Learning rate
             "GAMMA": 0.99,  # Discount factor
             "MEMORY_SIZE": 100000,  # Max memory buffer size
-            "LEARN_STEP": 1,  # Learning frequency
+            "LEARN_STEP": 30,  # Learning frequency
             "N_STEP": 1,  # Step number to calculate td error
             "PER": False,  # Use prioritized experience replay buffer
             "ALPHA": 0.6,  # Prioritized replay buffer parameter
@@ -627,10 +627,10 @@ if __name__ == "__main__":
         max_episodes = LESSON["max_train_episodes"]  # Total episodes
         max_steps = 500  # Maximum steps to take in each episode
         evo_epochs = 20  # Evolution frequency
-        evo_loop = 50  # Number of evaluation episodes
+        evo_loop = 10  # Number of evaluation episodes
         elite = pop[0]  # Assign a placeholder "elite" agent
         epsilon = 1.0  # Starting epsilon value
-        eps_end = 0.1  # Final epsilon value
+        eps_end = 0.01  # Final epsilon value
         eps_decay = 0.9998  # Epsilon decays
         opp_update_counter = 0
 
@@ -675,16 +675,18 @@ if __name__ == "__main__":
         total_steps = 0
         total_episodes = 0
         pbar = trange(int(max_episodes / episodes_per_epoch))
-
+        lo_mean_scores_in_epochs = []
         # Training loop
-        for idx_epi in pbar:
+        for idx_epo in pbar:
+            # List to hold the scores of agents in a population
+            lo_agent_in_pop_scores = []
             turns_per_episode = []
-            train_actions_hist = [0] * action_dim
+            
             for agent in pop:  # Loop through population
+                lo_scores_for_epoch = []
                 for episode in range(episodes_per_epoch):
                     env.reset()  # Reset environment at start of episode
                     observation, cumulative_reward, done, truncation, _ = env.last()
-
                     (
                         p1_state,
                         p1_state_flipped,
@@ -705,8 +707,14 @@ if __name__ == "__main__":
                         opponent_first = False
                     else:
                         opponent_first = True
-
-                    score = 0
+                    
+                    if opponent_first:
+                        pass
+                        # print("Agent is player 1")
+                    else:
+                        pass
+                        # print("Agent is player 0")
+                    agent_score = 0
                     turns = 0  # Number of turns counter
 
                     for idx_step in range(max_steps):
@@ -733,20 +741,32 @@ if __name__ == "__main__":
                             )[
                                 0
                             ]  # Get next action from agent
-                            train_actions_hist[p0_action] += 1
+                           
 
+                        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        # Player 0 Turn
+                        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~
                         env.step(p0_action)  # Act in environment
-                        observation, cumulative_reward, done, truncation, _ = env.last()
+                        observation, _, done, truncation, _ = env.last()
+                        
                         p0_next_state, p0_next_state_flipped = transform_and_flip(
                             observation, player=0
                         )
-                        if not opponent_first:
-                            score = cumulative_reward
+
                         turns += 1
 
                         # Check if game is over (Player 0 win)
                         if done or truncation:
+                            # print(done)
                             reward = env.reward(done=True, player=0)
+                            if not opponent_first: # If opponet was not first then opponent went second. Agent went first. So agent won here
+                                agent_score += reward
+                            else:
+                                agent_score -=reward # Agent lost here
+                            
+                            # print(f"Reward given to agent 0: {reward}")
+                            assert reward * LESSON["rewards"]["lose"]<0
+                            
                             memory.save_to_memory_vect_envs(
                                 np.concatenate(
                                     (
@@ -773,105 +793,125 @@ if __name__ == "__main__":
                                 ),
                                 [done, done, done, done],
                             )
-                        else:  # Play continues
-                            if p1_state is not None:
-                                reward = env.reward(done=False, player=1)
-                                memory.save_to_memory_vect_envs(
-                                    np.concatenate((p1_state, p1_state_flipped)),
-                                    [p1_action, 6 - p1_action],
-                                    [reward, reward],
-                                    np.concatenate(
-                                        (p1_next_state, p1_next_state_flipped)
-                                    ),
-                                    [done, done],
-                                )
-
-                            # Player 1"s turn
-                            p1_action_mask = observation["action_mask"]
-                            p1_state, p1_state_flipped = transform_and_flip(
-                                observation, player=1
-                            )
-
-                            if not opponent_first:
-                                if LESSON["opponent"] == "self":
-                                    p1_action = opponent.get_action(
-                                        p1_state, 0, p1_action_mask
-                                    )[0]
-                                elif LESSON["opponent"] == "random":
-                                    p1_action = opponent.get_action(
-                                        p1_action_mask,
-                                        p0_action,
-                                        LESSON["block_vert_coef"],
-                                    )
-                                else:
-                                    p1_action = opponent.get_action(player=1)
+                            break
+                        else: # player 0 did not win
+                            reward = env.reward(done=False, player=0)
+                            if not opponent_first: # Agent went first. No one has won
+                                agent_score += reward
                             else:
-                                p1_action = agent.get_action(
-                                    p1_state, epsilon, p1_action_mask
-                                )[
-                                    0
-                                ]  # Get next action from agent
-                                train_actions_hist[p1_action] += 1
-
-                            env.step(p1_action)  # Act in environment
-                            observation, cumulative_reward, done, truncation, _ = (
-                                env.last()
+                                agent_score -= reward 
+                            # print(f"Reward given to agent 0: {reward}")
+                        
+                            memory.save_to_memory_vect_envs(
+                                np.concatenate((p0_state, p0_state_flipped)),
+                                [p0_action, 6 - p0_action],
+                                [reward, reward],
+                                np.concatenate(
+                                    (p0_next_state, p0_next_state_flipped)
+                                ),
+                                [done, done],
                             )
-                            p1_next_state, p1_next_state_flipped = transform_and_flip(
-                                observation, player=1
+                        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        # Player 1 Turn
+                        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        p1_action_mask = observation["action_mask"]
+                        p1_state, p1_state_flipped = transform_and_flip(
+                            observation, player=1
+                        )
+
+                        if not opponent_first: # means opponent is going second. Agent is player 0
+                            if LESSON["opponent"] == "self":
+                                p1_action = opponent.get_action(
+                                    p1_state, 0, p1_action_mask
+                                )[0]
+                            elif LESSON["opponent"] == "random":
+                                p1_action = opponent.get_action(
+                                    p1_action_mask,
+                                    p0_action,
+                                    LESSON["block_vert_coef"],
+                                )
+                            else:
+                                p1_action = opponent.get_action(player=1)
+                        else:
+                            p1_action = agent.get_action(
+                                p1_state, epsilon, p1_action_mask
+                            )[
+                                0
+                            ]  # Get next action from agent
+
+                        env.step(p1_action)  # Act in environment
+                        
+                        observation, _, done, truncation, _ = (
+                            env.last()
+                        )
+                        
+                        p1_next_state, p1_next_state_flipped = transform_and_flip(
+                            observation, player=1
+                        )
+
+                        turns += 1
+
+                        # Check if game is over (Player 1 win)
+                        if done or truncation:
+                            reward = env.reward(done=True, player=1)
+                            
+                            if opponent_first: # player 1 won. Opponeent went first, so our agent is player 1
+                                agent_score += reward
+                            else: 
+                                agent_score -=reward # our agent lost.
+                                
+                            memory.save_to_memory_vect_envs(
+                                np.concatenate(
+                                    (
+                                        p0_state,
+                                        p1_state,
+                                        p0_state_flipped,
+                                        p1_state_flipped,
+                                    )
+                                ),
+                                [
+                                    p0_action,
+                                    p1_action,
+                                    6 - p0_action,
+                                    6 - p1_action,
+                                ],
+                                [
+                                    LESSON["rewards"]["lose"],
+                                    reward,
+                                    LESSON["rewards"]["lose"],
+                                    reward,
+                                ],
+                                np.concatenate(
+                                    (
+                                        p0_next_state,
+                                        p1_next_state,
+                                        p0_next_state_flipped,
+                                        p1_next_state_flipped,
+                                    )
+                                ),
+                                [done, done, done, done],
                             )
+                            break
 
-                            if opponent_first:
-                                score = cumulative_reward
-                            turns += 1
-
-                            # Check if game is over (Player 1 win)
-                            if done or truncation:
-                                reward = env.reward(done=True, player=1)
-                                memory.save_to_memory_vect_envs(
-                                    np.concatenate(
-                                        (
-                                            p0_state,
-                                            p1_state,
-                                            p0_state_flipped,
-                                            p1_state_flipped,
-                                        )
-                                    ),
-                                    [
-                                        p0_action,
-                                        p1_action,
-                                        6 - p0_action,
-                                        6 - p1_action,
-                                    ],
-                                    [
-                                        LESSON["rewards"]["lose"],
-                                        reward,
-                                        LESSON["rewards"]["lose"],
-                                        reward,
-                                    ],
-                                    np.concatenate(
-                                        (
-                                            p0_next_state,
-                                            p1_next_state,
-                                            p0_next_state_flipped,
-                                            p1_next_state_flipped,
-                                        )
-                                    ),
-                                    [done, done, done, done],
-                                )
-
-                            else:  # Play continues
-                                reward = env.reward(done=False, player=0)
-                                memory.save_to_memory_vect_envs(
-                                    np.concatenate((p0_state, p0_state_flipped)),
-                                    [p0_action, 6 - p0_action],
-                                    [reward, reward],
-                                    np.concatenate(
-                                        (p0_next_state, p0_next_state_flipped)
-                                    ),
-                                    [done, done],
-                                )
-
+                        else:  # Game did not end with agent's turn
+                            reward = env.reward(done=False, player=1)
+                            
+                            if opponent_first: # player 1 won. Opponeent went first, so our agent is player 1
+                                agent_score += reward
+                            else: 
+                                agent_score -=reward # our agent lost.
+                            
+                            memory.save_to_memory_vect_envs(
+                                np.concatenate((p1_state, p1_state_flipped)),
+                                [p1_action, 6 - p1_action],
+                                [reward, reward],
+                                np.concatenate(
+                                    (p1_next_state, p1_next_state_flipped)
+                                ),
+                                [done, done],
+                            )
+                            
+                            
                         # Learn according to learning frequency
                         if (memory.counter % agent.learn_step == 0) and (
                             len(memory) >= agent.batch_size
@@ -884,34 +924,53 @@ if __name__ == "__main__":
                         # Stop episode if any agents have terminated
                         if done or truncation:
                             break
+                
+                    lo_agent_in_pop_scores.append(agent_score) # agent scores for this population in this epoch
+                    agent.scores.append(agent_score)
+                    # print(agent_score)
+                lo_scores_for_epoch.append(agent_score) # append the score for this agent in this population
+                
+            # Get the mean scores for all agents in pop in this epoch
+            mean_score_in_epoch = np.mean(lo_scores_for_epoch)
+            # print(f" Epoch {idx_epo}, mean score {mean_score_in_epoch}")
+            
+            
+            lo_mean_scores_in_epochs.append(mean_score_in_epoch)
+            
+            ### Update Opponent Pool if Required
 
-                    total_steps += idx_step + 1
-                    total_episodes += 1
-                    turns_per_episode.append(turns)
-                    # Save the total episode reward
-                    agent.scores.append(score)
+            if LESSON["opponent"] == "self":
+                if (total_episodes % LESSON["opponent_upgrade"] == 0) and (
+                    (idx_epo + 1) > evo_epochs
+                ):
+                    elite_opp, _, _ = tournament._elitism(pop)
+                    elite_opp.actor.eval()
+                    opponent_pool.append(elite_opp)
+                    opp_update_counter += 1
 
-                    if LESSON["opponent"] == "self":
-                        if (total_episodes % LESSON["opponent_upgrade"] == 0) and (
-                            (idx_epi + 1) > evo_epochs
-                        ):
-                            elite_opp, _, _ = tournament._elitism(pop)
-                            elite_opp.actor.eval()
-                            opponent_pool.append(elite_opp)
-                            opp_update_counter += 1
-
-                # Update epsilon for exploration
-                epsilon = max(eps_end, epsilon * eps_decay)
-
-            mean_turns = np.mean(turns_per_episode)
+            # Update epsilon for exploration
+            epsilon = max(eps_end, epsilon * eps_decay)
+                
 
             # Now evolve population if necessary
-            if (idx_epi + 1) % evo_epochs == 0:
+            if (idx_epo + 1) % evo_epochs == 0:
                 # Evaluate population vs random actions
+                # print("===========EVOLVING================")
                 fitnesses = []
                 win_rates = []
                 eval_actions_hist = [0] * action_dim  # Eval actions histogram
                 eval_turns = 0  # Eval turns counter
+                
+                
+                
+                # Create opponent of desired difficulty
+                
+                if LESSON['eval_opponent'] == 'random':
+                    opponent = Opponent(env, difficulty=LESSON["eval_opponent"])
+                else:
+                    print("Loaded learned agent for evaluation")
+                    opponent = DQN.load("/home/aadrian/Documents/RL_projects/connect4/models/DQN/lesson1_trained_agent.pt", device)
+                
                 for agent in pop:
                     with torch.no_grad():
                         rewards = []
@@ -920,11 +979,11 @@ if __name__ == "__main__":
                             observation, cumulative_reward, done, truncation, _ = (
                                 env.last()
                             )
+                            
 
                             player = -1  # Tracker for which player"s turn it is
 
-                            # Create opponent of desired difficulty
-                            opponent = Opponent(env, difficulty=LESSON["eval_opponent"])
+
 
                             # Randomly decide whether agent will go first or second
                             if random.random() > 0.5:
@@ -932,55 +991,53 @@ if __name__ == "__main__":
                             else:
                                 opponent_first = True
 
-                            score = 0
+                            agent_score = 0
 
                             for idx_step in range(max_steps):
+                                state = observation['observation']
                                 action_mask = observation["action_mask"]
-                                if player < 0:
-                                    if opponent_first:
+                                
+                                
+                                state = np.moveaxis(
+                                    observation["observation"], [-1], [-3]
+                                )
+                                state[[0, 1], :, :] = state[[1, 0], :, :]
+                                state = np.expand_dims(state, 0)
+                                
+                                if player < 0: # player is -1
+                                    if opponent_first: # Agent is player 1. Opponent is player -1
                                         if LESSON["eval_opponent"] == "random":
                                             action = opponent.get_action(action_mask)
                                         else:
-                                            action = opponent.get_action(player=0)
-                                    else:
-                                        state = np.moveaxis(
-                                            observation["observation"], [-1], [-3]
-                                        )
-                                        state = np.expand_dims(state, 0)
-                                        action = agent.get_action(
-                                            state, 0, action_mask
-                                        )[
-                                            0
-                                        ]  # Get next action from agent
-                                        eval_actions_hist[action] += 1
+                                            action = opponent.get_action(state, 0, action_mask)[0]
+                                            # print(f"opponent took action {action}")
+                                    else: # agent is player -1, Opponent is player 1
+                                        action = agent.get_action(state, 0, action_mask)[0]  # Get next action from agent
                                 if player > 0:
+                                
                                     if not opponent_first:
                                         if LESSON["eval_opponent"] == "random":
                                             action = opponent.get_action(action_mask)
                                         else:
-                                            action = opponent.get_action(player=1)
+                                            action = opponent.get_action(state, 0, action_mask)[0]
+                                            # print(f"opponent took action {action}")
                                     else:
-                                        state = np.moveaxis(
-                                            observation["observation"], [-1], [-3]
-                                        )
-                                        state[[0, 1], :, :] = state[[1, 0], :, :]
-                                        state = np.expand_dims(state, 0)
-                                        action = agent.get_action(
-                                            state, 0, action_mask
-                                        )[
-                                            0
-                                        ]  # Get next action from agent
-                                        eval_actions_hist[action] += 1
-
+                                        action = agent.get_action(state, 0, action_mask)[0]  # Get next action from agent
+                                        
+                                # print(action)
+                                ### PLAYER 0s TURN
                                 env.step(action)  # Act in environment
-                                observation, cumulative_reward, done, truncation, _ = (
+                                observation, _, done, truncation, _ = (
                                     env.last()
                                 )
-
+                            
+                                # Will be true agent if on agent's turn
                                 if (player > 0 and opponent_first) or (
-                                    player < 0 and not opponent_first
+                                    player < 0 and not opponent_first # player is -1, opponent went second, so opponent is player 1
                                 ):
-                                    score = cumulative_reward
+                                    reward = env.reward(done=done, player=1)
+
+                                    agent_score += reward
 
                                 eval_turns += 1
 
@@ -988,53 +1045,56 @@ if __name__ == "__main__":
                                     break
 
                                 player *= -1
-
-                            rewards.append(score)
-                    mean_fit = np.mean(rewards)
-                    agent.fitness.append(mean_fit)
-                    fitnesses.append(mean_fit)
+                            # print(agent_score)
+                            rewards.append(agent_score)
+                    mean_fit = np.mean(rewards) # mean reward for one agent across loops
+                    agent.fitness.append(mean_fit) # 
+                    fitnesses.append(mean_fit) # the rewards of each agent in the population
 
                 eval_turns = eval_turns / len(pop) / evo_loop
-
+                # print(fitnesses)
                 pbar.set_postfix_str(
-                    f"    Train Mean Score: {np.mean(agent.scores[-episodes_per_epoch:])}   Train Mean Turns: {mean_turns}   Eval Mean Fitness: {np.mean(fitnesses)}   Eval Best Fitness: {np.max(fitnesses)}   Eval Mean Turns: {eval_turns}   Total Steps: {total_steps}"
+                    f"Train Mean Score: {np.mean(agent.scores[-episodes_per_epoch:])} Eval Mean Fitness: {np.mean(fitnesses)}   Eval Best Fitness: {np.max(fitnesses)}   Eval Mean Turns: {eval_turns}   Total Steps: {total_steps}"
                 )
                 pbar.update(0)
 
                 # Format action histograms for visualisation
-                train_actions_hist = [
-                    freq / sum(train_actions_hist) for freq in train_actions_hist
-                ]
-                eval_actions_hist = [
-                    freq / sum(eval_actions_hist) for freq in eval_actions_hist
-                ]
-                train_actions_dict = {
-                    f"train/action_{index}": action
-                    for index, action in enumerate(train_actions_hist)
-                }
-                eval_actions_dict = {
-                    f"eval/action_{index}": action
-                    for index, action in enumerate(eval_actions_hist)
-                }
-
-                wandb_dict = {
-                    "global_step": total_steps,
-                    "train/mean_score": np.mean(agent.scores[-episodes_per_epoch:]),
-                    "train/mean_turns_per_game": mean_turns,
-                    "train/epsilon": epsilon,
-                    "train/opponent_updates": opp_update_counter,
-                    "eval/mean_fitness": np.mean(fitnesses),
-                    "eval/best_fitness": np.max(fitnesses),
-                    "eval/mean_turns_per_game": eval_turns,
-                }
+                # train_actions_hist = [
+                #     freq / sum(train_actions_hist) for freq in train_actions_hist
+                # ]
+                # eval_actions_hist = [
+                #     freq / sum(eval_actions_hist) for freq in eval_actions_hist
+                # ]
+                # train_actions_dict = {
+                #     f"train/action_{index}": action
+                #     for index, action in enumerate(train_actions_hist)
+                # }
+                # eval_actions_dict = {
+                #     f"eval/action_{index}": action
+                #     for index, action in enumerate(eval_actions_hist)
+                # }
                 
-                metrics_dict[idx_epi] = wandb_dict
+                # with open(f"metrics{lesson_number}/eval_actions.jsonl", "a") as f:
+                #     json.dump(eval_actions_dict, f)
+                #     f.write("\n")  # Ensure each JSON object is on a separate line
+                        
+
+                os.makedirs(f'metrics{lesson_number}', exist_ok=True)
 
                 # Tournament selection and population mutation
                 elite, pop = tournament.select(pop)
                 pop = mutations.mutation(pop)
-
-
+                
+                mean_fitnes= np.mean(fitnesses)
+                
+                training_metrics = {"epoch":idx_epo,
+                                    "mean_fitness":mean_fitnes}
+                
+                with open(f"metrics{lesson_number}/trainingmetrics.json", "a") as f:
+                    json.dump(training_metrics, f)
+                    f.write("\n")  # Ensure each JSON object is on a separate line
+                
+                
 
         # Save the trained agent
         save_path = LESSON["save_path"]
@@ -1042,7 +1102,6 @@ if __name__ == "__main__":
         elite.save_checkpoint(save_path)
         # Convert NumPy scalars to Python native types
         metrics = pd.DataFrame.from_dict(metrics_dict, orient="index")
-        print(metrics)
         metrics.to_csv(f"{save_path}_metrics.csv")
 
         print(f"Elite agent saved to '{save_path}'.")

@@ -248,12 +248,10 @@ class CurriculumEnv:
       :param player: Player who we are checking, 0 or 1
       :type player: int
       """
+      reward = 0
       if done:
-         reward = (
-               self.lesson["rewards"]["vertical_win"]
-               if self.check_vertical_win(player)
-               else self.lesson["rewards"]["win"]
-         )
+         reward = self.lesson["rewards"]["win"]
+         
       else:
          agent_three_count = self.check_three_in_row(1 - player)
          opp_three_count = self.check_three_in_row(player)

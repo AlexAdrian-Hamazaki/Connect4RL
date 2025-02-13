@@ -32,7 +32,19 @@ def _label_with_episode_number(frame, episode_num, frame_no, p):
     if p is None:
         player = "Self-play"
         color = (255, 255, 255)
-    drawer.text((700, 5), f"Agent: {player}", fill=color, font=font)
+        
+    # Get text bounding box to compute width
+    text = f"Agent: {player}"
+    bbox = drawer.textbbox((0, 0), text, font=font)  # Get (x0, y0, x1, y1)
+    text_width = bbox[2] - bbox[0]
+
+    # Calculate x-position for right-aligned text
+    image_width = im.width
+    x_pos = image_width - text_width - 20  # 20px padding from the right edge
+
+    # Draw Agent Label
+    drawer.text((x_pos, 5), text, fill=color, font=font)
+    
     return im
 
 
@@ -50,8 +62,8 @@ def resize_frames(frames, fraction):
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    path = "models/DQN/lesson3_trained_agent.pt"  # Path to saved agent checkpoint
+    lesson = 2
+    path = f"models/DQN/lesson{lesson}_trained_agent.pt"  # Path to saved agent checkpoint
 
     env = connect_four_v3.env(render_mode="rgb_array")
     env.reset()
@@ -68,11 +80,20 @@ if __name__ == "__main__":
     # We flatten the 6x7x2 observation as input to the agent's neural network
     state_dim = np.zeros(state_dim[0]).flatten().shape
     action_dim = action_dim[0]
+    
+    
+            # Set the seed for reproducibility
+    seed = 42  # Change as needed
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
     # Load the saved agent
     dqn = DQN.load(path, device)
+    
 
-    for opponent_difficulty in ["random", "weak", "strong", "self"]:
+
+    for opponent_difficulty in ["random", "self"]:
         # Create opponent
         if opponent_difficulty == "self":
             opponent = dqn
@@ -80,7 +101,7 @@ if __name__ == "__main__":
             opponent = Opponent(env, opponent_difficulty)
 
         # Define test loop parameters
-        episodes = 2  # Number of episodes to test agent on
+        episodes = 5  # Number of episodes to test agent on
         max_steps = (
             500  # Max number of steps to take in the environment in each episode
         )
@@ -94,12 +115,9 @@ if __name__ == "__main__":
 
         # Test loop for inference
         for ep in range(episodes):
-            if ep / episodes < 0.5:
-                opponent_first = False
-                p = 1
-            else:
-                opponent_first = True
-                p = 2
+            opponent_first = False
+            p = 1
+
             if opponent_difficulty == "self":
                 p = None
             env.reset()  # Reset environment at start of episode
@@ -117,12 +135,12 @@ if __name__ == "__main__":
                     if opponent_first:
                         if opponent_difficulty == "self":
                             action = opponent.get_action(
-                                state, epsilon=0, action_mask=action_mask
+                                state, epsilon=0.1, action_mask=action_mask
                             )[0]
                         elif opponent_difficulty == "random":
                             action = opponent.get_action(action_mask)
-                        else:
-                            action = opponent.get_action(player=0)
+                        # else:
+                        #     action = opponent.get_action(player=0)
                     else:
                         action = dqn.get_action(
                             state, epsilon=0, action_mask=action_mask
@@ -134,12 +152,12 @@ if __name__ == "__main__":
                     if not opponent_first:
                         if opponent_difficulty == "self":
                             action = opponent.get_action(
-                                state, epsilon=0, action_mask=action_mask
+                                state, epsilon=0.1, action_mask=action_mask
                             )[0]
                         elif opponent_difficulty == "random":
                             action = opponent.get_action(action_mask)
-                        else:
-                            action = opponent.get_action(player=1)
+                        # else:
+                        #     action = opponent.get_action(player=1)
                     else:
                         action = dqn.get_action(
                             state, epsilon=0, action_mask=action_mask
@@ -148,20 +166,23 @@ if __name__ == "__main__":
                         ]  # Get next action from agent
                 env.step(action)  # Act in environment
                 observation, reward, termination, truncation, _ = env.last()
+                reward = -reward
                 # Save the frame for this step and append to frames list
                 frame = env.render()
-                frames.append(
-                    _label_with_episode_number(
+                frame = _label_with_episode_number(
                         frame, episode_num=ep, frame_no=idx_step, p=p
                     )
-                )
+        
+                frames.append(frame)
 
+                # Will be true agent if on agent's turn
                 if (player > 0 and opponent_first) or (
-                    player < 0 and not opponent_first
+                    player < 0 and not opponent_first # player is -1, opponent went second, so opponent is player 1
                 ):
+                    # reward = env.reward(done=termination, player=1)
+
                     score += reward
-                else:
-                    score -= reward
+
 
                 # Stop episode if any agents have terminated
                 if truncation or termination:
@@ -172,16 +193,19 @@ if __name__ == "__main__":
             print("-" * 15, f"Episode: {ep+1}", "-" * 15)
             print(f"Episode length: {idx_step}")
             print(f"Score: {score}")
+            # Add 5 copies of the same frame
+            frames.extend([frame] * 5)
+            
 
         print("============================================")
 
         frames = resize_frames(frames, 0.5)
 
         # Save the gif to specified path
-        gif_path = "./videos/"
+        gif_path = f"./videos/lesson{lesson}"
         os.makedirs(gif_path, exist_ok=True)
         imageio.mimwrite(
-            os.path.join("./videos/", f"connect_four_{opponent_difficulty}_opp.gif"),
+            os.path.join(gif_path, f"connect_four_{opponent_difficulty}_opp.gif"),
             frames,
             duration=400,
             loop=True,

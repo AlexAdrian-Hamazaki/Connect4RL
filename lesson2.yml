@@ -1,23 +1,21 @@
 ---
 # Connect Four Lesson 2
 # Train against random agent: 'random', weak opponent: 'weak', strong opponent: 'strong', or use self-play: 'self'
-opponent: weak
-opponent_pool_size:       # Size of opponent pool for self-play
-opponent_upgrade:       # Epoch frequency to update opponent pool
-eval_opponent: weak  # 'random', 'weak' or 'strong'
+opponent: self
+opponent_pool_size: 6  # Size of opponent pool for self-play
+opponent_upgrade: 500  # Epoch frequency to update opponent pool
+eval_opponent: /home/aadrian/Documents/RL_projects/connect4/models/DQN/lesson1_trained_agent.pt  # 'random', or path to smart opponent
 pretrained_path: models/DQN/lesson1_trained_agent.pt  # Path to pretrained model weights
 save_path: models/DQN/lesson2_trained_agent.pt  # Path to save trained model
-max_train_episodes: 10000  # Maximum number of training episodes in environment
+max_train_episodes: 5000  # Maximum number of training episodes in environment
 
 ## Game specific:
 buffer_warm_up: false  # Fill replay buffer with random experiences
 warm_up_opponent:       # Difficulty level of warm up experiences
 agent_warm_up: 0  # Number of epochs to warm up agent by training on random experiences
-block_vert_coef: 1  # How many times more likely to block vertically
 rewards:  # Rewards for different outcomes
     win: 1
-    vertical_win: 1
-    three_in_row: 0.02
-    opp_three_in_row: -0.02
+    three_in_row: 0
+    opp_three_in_row: 0
     lose: -1
     play_continues: 0

@@ -506,7 +506,7 @@ if __name__ == "__main__":
     print("===== AgileRL Curriculum Learning Demo =====")
 
     
-    for lesson_number in range(2, 3):
+    for lesson_number in range(1, 3):
         # Load lesson for curriculum
         with open(f"lesson{lesson_number}.yml") as file:
             LESSON = yaml.safe_load(file)
@@ -675,15 +675,19 @@ if __name__ == "__main__":
         total_steps = 0
         total_episodes = 0
         pbar = trange(int(max_episodes / episodes_per_epoch))
-        lo_mean_scores_in_epochs = []
+        
+        
         # Training loop
         for idx_epo in pbar:
             # List to hold the scores of agents in a population
-            lo_agent_in_pop_scores = []
+            lo_mean_pop_scores = []
+            
             turns_per_episode = []
             
             for agent in pop:  # Loop through population
-                lo_scores_for_epoch = []
+                
+                scores_in_episodes = []
+                
                 for episode in range(episodes_per_epoch):
                     env.reset()  # Reset environment at start of episode
                     observation, cumulative_reward, done, truncation, _ = env.last()
@@ -925,17 +929,28 @@ if __name__ == "__main__":
                         if done or truncation:
                             break
                 
-                    lo_agent_in_pop_scores.append(agent_score) # agent scores for this population in this epoch
+                    scores_in_episodes.append(agent_score) # agent scores for this population in this epoch
                     agent.scores.append(agent_score)
                     # print(agent_score)
-                lo_scores_for_epoch.append(agent_score) # append the score for this agent in this population
+                
+                lo_mean_pop_scores.append(np.mean(scores_in_episodes))    
                 
             # Get the mean scores for all agents in pop in this epoch
-            mean_score_in_epoch = np.mean(lo_scores_for_epoch)
-            # print(f" Epoch {idx_epo}, mean score {mean_score_in_epoch}")
             
             
-            lo_mean_scores_in_epochs.append(mean_score_in_epoch)
+            training_metrics = {}
+            training_metrics['epoch']=idx_epo
+            training_metrics['epsilon'] =np.round(epsilon,2)
+            training_metrics['mean_training_scores']= np.round(lo_mean_pop_scores,2).tolist()
+            training_metrics['mean_training_score']= np.mean(np.round(lo_mean_pop_scores,2)).tolist()
+            
+        
+            
+            with open(f"metrics{lesson_number}/trainingmetrics.json", "a") as f:
+                    json.dump(training_metrics, f)
+                    f.write("\n")  # Ensure each JSON object is on a separate line
+            
+            
             
             ### Update Opponent Pool if Required
 
@@ -956,7 +971,7 @@ if __name__ == "__main__":
             if (idx_epo + 1) % evo_epochs == 0:
                 # Evaluate population vs random actions
                 # print("===========EVOLVING================")
-                fitnesses = []
+                agent_fitnesses = []
                 win_rates = []
                 eval_actions_hist = [0] * action_dim  # Eval actions histogram
                 eval_turns = 0  # Eval turns counter
@@ -973,7 +988,7 @@ if __name__ == "__main__":
                 
                 for agent in pop:
                     with torch.no_grad():
-                        rewards = []
+                        agent_fitness = []
                         for i in range(evo_loop):
                             env.reset()  # Reset environment at start of episode
                             observation, cumulative_reward, done, truncation, _ = (
@@ -1046,16 +1061,17 @@ if __name__ == "__main__":
 
                                 player *= -1
                             # print(agent_score)
-                            rewards.append(agent_score)
-                    mean_fit = np.mean(rewards) # mean reward for one agent across loops
-                    agent.fitness.append(mean_fit) # 
-                    fitnesses.append(mean_fit) # the rewards of each agent in the population
+                            agent_fitness.append(agent_score)
+                            
+                    mean_agent_fitness = np.mean(agent_fitness) # mean reward for one agent across loops
+                    agent.fitness.append(mean_agent_fitness) # 
+                    
+                    agent_fitnesses.append(mean_agent_fitness) # the rewards of each agent in the population
+
 
                 eval_turns = eval_turns / len(pop) / evo_loop
                 # print(fitnesses)
-                pbar.set_postfix_str(
-                    f"Train Mean Score: {np.mean(agent.scores[-episodes_per_epoch:])} Eval Mean Fitness: {np.mean(fitnesses)}   Eval Best Fitness: {np.max(fitnesses)}   Eval Mean Turns: {eval_turns}   Total Steps: {total_steps}"
-                )
+
                 pbar.update(0)
 
                 # Format action histograms for visualisation
@@ -1085,12 +1101,14 @@ if __name__ == "__main__":
                 elite, pop = tournament.select(pop)
                 pop = mutations.mutation(pop)
                 
-                mean_fitnes= np.mean(fitnesses)
+                mean_fitnes= np.mean(agent_fitnesses)
                 
                 training_metrics = {"epoch":idx_epo,
-                                    "mean_fitness":mean_fitnes}
+                                    "agent_evaluation_fitnesses": np.round(agent_fitnesses,2).tolist(),
+                                    "mean_evaluation_fitness":np.mean(np.round(mean_fitnes,2)).tolist()
+                                    }
                 
-                with open(f"metrics{lesson_number}/trainingmetrics.json", "a") as f:
+                with open(f"metrics{lesson_number}/evalmetrics.json", "a") as f:
                     json.dump(training_metrics, f)
                     f.write("\n")  # Ensure each JSON object is on a separate line
                 

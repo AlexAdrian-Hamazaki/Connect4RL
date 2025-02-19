@@ -17,7 +17,7 @@ The model's evaluation significantly increased over training, but did not conver
 
 In the second curriculum (can be found as lesson2.yml). I trained the model to play against itself (50,000 games)
 
-The model performed very well in evaluation
+The model performed very well in evaluation (playing against randomly playing opponent)
 
 ![lesson1](lesson2_training.png)
 

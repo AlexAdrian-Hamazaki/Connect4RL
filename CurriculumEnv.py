@@ -316,7 +316,7 @@ class Opponent:
       top[full_columns] = 6
       self.top = top
 
-   def random_opponent(self, action_mask, last_opp_move=None, block_vert_coef=1):
+   def random_opponent(self, action_mask, last_opp_move=None, block_vert_coef=0):
       """Takes move for random opponent. If the lesson aims to randomly block vertical wins with a higher probability, this is done here too.
 
       :param action_mask: Mask of legal actions: 1=legal, 0=illegal
